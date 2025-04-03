@@ -32,38 +32,40 @@ async def on_ready():
 #on every message that is sent it checks its value and adds it to correct entry in db
 @bot.event
 async def on_message(msg):
-    if msg.author.id != bot.user.id:
+    if msg.author.bot == False:
+        serverid = msg.guild.id
         userid = msg.author.id
 
-        if get_user(userid) is None:
-            add_user(userid)
+        if get_user(userid, serverid) is None:
+            add_user(userid, serverid)
 
             karmaDelta = sentiAnaly(msg.content)
             
-            alterRecord(userid, karmaDelta)
+            alterRecord(userid, karmaDelta, serverid)
         else:
 
             karmaDelta = sentiAnaly(msg.content)
 
-            alterRecord(userid, karmaDelta)
+            alterRecord(userid, karmaDelta, serverid)
 
 #command to return sql entry data
 @bot.tree.command(name="whatismysocialcreditscore", description="Lets you learn your faults by revealing your karma.")
 async def whatismysocialcreditscore(interaction: discord.Interaction):
     userid = interaction.user.id
+    serverid = interaction.guild.id
+    serverName = interaction.guild.name
 
-    if get_user(userid) is None:
+    if get_user(userid, serverid) is None:
         await interaction.response.send_message("You are currently not in our system. Get in line.")
     else:
         embed = discord.Embed(
         colour=discord.Colour.blue(),
-        description="This is a report of your social credit and the number of messages sent.",
+        description=f"This is a report of your social credit and the number of messages sent in {serverName}.",
         title="Social Credit Report"
         )
 
-        report = get_user(userid)
-        numMessages = report[1]
-        score = report[2]
+        numMessages = get_user(userid, serverid)[2]
+        score = get_user(userid, serverid)[3]
 
         embed.set_author(name=interaction.user.name, icon_url=interaction.user.avatar.url)
 
@@ -80,23 +82,29 @@ async def whatismysocialcreditscore(interaction: discord.Interaction):
 
 @bot.tree.command(name="socialcreditranking", description="Lets learn the greatest and worst of this world.")
 async def socialcreditranking(interaction: discord.Interaction):
-    userIDGood = maxKarma()[0]
-    userIDBad = minKarma()[0]
+    serverid = interaction.guild.id
+    
+    if maxKarma(serverid) is None or minKarma(serverid) is None:
+        await interaction.response.send_message("There are not enough entries to rank them.")
+    else:
+        
+        userIDGood = maxKarma(serverid)[0]
+        userIDBad = minKarma(serverid)[0]
 
-    scoreGood = get_user(userIDGood)[2]
-    scoreBad = get_user(userIDBad)[2]
+        scoreGood = get_user(userIDGood, serverid)[3]
+        scoreBad = get_user(userIDBad, serverid)[3]
 
-    userPos = await bot.fetch_user(userIDGood)
-    userNeg = await bot.fetch_user(userIDBad)
+        userPos = await bot.fetch_user(userIDGood)
+        userNeg = await bot.fetch_user(userIDBad)
 
-    embed = discord.Embed(
-        colour=discord.Colour.blue(),
-        title="Social Credit Rankings"
-    )
+        embed = discord.Embed(
+            colour=discord.Colour.blue(),
+            title="Social Credit Rankings"
+        )
 
-    embed.add_field(name="**Highest Credit Score**", value=f"{userPos.name}\n {round(scoreGood, 2)}")
-    embed.add_field(name="**Lowest Credit Score**", value=f"{userNeg.name}\n {round(scoreBad, 2)}")
+        embed.add_field(name="**Highest Credit Score**", value=f"{userPos.name}\n {round(scoreGood, 2)}")
+        embed.add_field(name="**Lowest Credit Score**", value=f"{userNeg.name}\n {round(scoreBad, 2)}")
 
-    await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
 bot.run(TOKEN)
