@@ -43,9 +43,12 @@ def maxKarma(server_id):
     conn = sqlite3.connect('discord_bot.db')
     c = conn.cursor()
 
-    c.execute('''SELECT user_id FROM users WHERE karma = (SELECT max(karma) FROM users) AND server_id = ?''', (server_id,))
+    c.execute('''
+              SELECT user_id 
+              FROM users 
+              WHERE karma = (SELECT MAX(karma) FROM users WHERE server_id = ?)''', (server_id,))
     maxID = c.fetchone()
-
+    conn.close()
     return maxID
 
 
@@ -53,7 +56,9 @@ def minKarma(server_id):
     conn = sqlite3.connect('discord_bot.db')
     c = conn.cursor()
 
-    c.execute('''SELECT * FROM users WHERE karma = (SELECT min(karma) FROM users) AND server_id = ?''', (server_id,))
+    c.execute('''SELECT user_id 
+              FROM users 
+              WHERE karma = (SELECT MIN(karma) FROM users WHERE server_id = ?)''', (server_id,))
     minID = c.fetchone()
-
+    conn.close()
     return minID

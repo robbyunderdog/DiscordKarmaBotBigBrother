@@ -86,6 +86,7 @@ async def socialcreditranking(interaction: discord.Interaction):
     
     if maxKarma(serverid) is None or minKarma(serverid) is None:
         await interaction.response.send_message("There are not enough entries to rank them.")
+        return
     else:
         
         userIDGood = maxKarma(serverid)[0]
