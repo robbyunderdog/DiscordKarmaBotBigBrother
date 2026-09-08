@@ -1,0 +1,6 @@
+dc_env/
+__pycache__/
+*.pyc
+.env
+discord_bot.db
+discord_bot.db-*

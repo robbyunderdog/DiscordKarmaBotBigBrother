@@ -1,52 +1,63 @@
+# Discord bot that scores every message's sentiment and tracks a running
+# "social credit" karma total per user, per server.
 import os
 import discord
 from discord.ext import commands
-from discord import app_commands
 from dotenv import load_dotenv
-from bigbrotherdatabase import init_db, add_user, get_user, alterRecord, minKarma, maxKarma
+from bigbrotherdatabase import init_db, get_user, record_message, minKarma, maxKarma
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-nltk.download('all')
+
+# VADER's lexicon is baked into the Docker image at build time (see Dockerfile).
+# nltk.data.find() checks whether it's already present before hitting the network,
+# so a normal restart doesn't re-download it every time.
+try:
+    nltk.data.find('sentiment/vader_lexicon/vader_lexicon.txt')
+except LookupError:
+    nltk.download('vader_lexicon')
 
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents = intents, activity=discord.Activity(type=discord.ActivityType.listening, name="every conversation."))
+class BigBrotherBot(commands.Bot):
+    async def setup_hook(self):
+        # Runs once, before the bot connects to Discord's gateway - the right
+        # place to set up the async DB connection pool.
+        await init_db()
 
-init_db()
+bot = BigBrotherBot(command_prefix="!", intents = intents, activity=discord.Activity(type=discord.ActivityType.listening, name="every conversation."))
+
 analyzer = SentimentIntensityAnalyzer()
 
 def sentiAnaly(msg):
+    # VADER's "compound" score is already normalized to [-1, 1]; scale it up to
+    # [-10, 10] so karma deltas feel more meaningful than tiny decimals.
     score = analyzer.polarity_scores(msg)
     print(f"{score}")
     return round(score['compound'] * 10, 2)
 
 @bot.event
 async def on_ready():
+    # Re-syncs slash commands with Discord on every reconnect, not just first
+    # startup - harmless at this bot's scale, just not strictly necessary.
     await bot.tree.sync()
     print(f"{bot.user} is online!")
 
 #on every message that is sent it checks its value and adds it to correct entry in db
 @bot.event
 async def on_message(msg):
-    if msg.author.bot == False:
-        serverid = msg.guild.id
-        userid = msg.author.id
+    if msg.author.bot or msg.guild is None:
+        return  # ignore other bots and DMs (DMs have no msg.guild)
 
-        if get_user(userid, serverid) is None:
-            add_user(userid, serverid)
+    serverid = msg.guild.id
+    userid = msg.author.id
 
-            karmaDelta = sentiAnaly(msg.content)
-            
-            alterRecord(userid, karmaDelta, serverid)
-        else:
+    karmaDelta = sentiAnaly(msg.content)
 
-            karmaDelta = sentiAnaly(msg.content)
-
-            alterRecord(userid, karmaDelta, serverid)
+    await record_message(userid, serverid, karmaDelta)
 
 #command to return sql entry data
 @bot.tree.command(name="whatismysocialcreditscore", description="Lets you learn your faults by revealing your karma.")
@@ -55,7 +66,9 @@ async def whatismysocialcreditscore(interaction: discord.Interaction):
     serverid = interaction.guild.id
     serverName = interaction.guild.name
 
-    if get_user(userid, serverid) is None:
+    user = await get_user(userid, serverid)
+
+    if user is None:
         await interaction.response.send_message("You are currently not in our system. Get in line.")
     else:
         embed = discord.Embed(
@@ -64,8 +77,8 @@ async def whatismysocialcreditscore(interaction: discord.Interaction):
         title="Social Credit Report"
         )
 
-        numMessages = get_user(userid, serverid)[2]
-        score = get_user(userid, serverid)[3]
+        numMessages = user[2]
+        score = user[3]
 
         embed.set_author(name=interaction.user.name, icon_url=interaction.user.avatar.url)
 
@@ -80,20 +93,24 @@ async def whatismysocialcreditscore(interaction: discord.Interaction):
 
         await interaction.response.send_message(embed=embed)
 
+# reports the highest- and lowest-karma users in the current server
 @bot.tree.command(name="socialcreditranking", description="Lets learn the greatest and worst of this world.")
 async def socialcreditranking(interaction: discord.Interaction):
     serverid = interaction.guild.id
-    
-    if maxKarma(serverid) is None or minKarma(serverid) is None:
+
+    maxRow = await maxKarma(serverid)
+    minRow = await minKarma(serverid)
+
+    if maxRow is None or minRow is None:
         await interaction.response.send_message("There are not enough entries to rank them.")
         return
     else:
-        
-        userIDGood = maxKarma(serverid)[0]
-        userIDBad = minKarma(serverid)[0]
 
-        scoreGood = get_user(userIDGood, serverid)[3]
-        scoreBad = get_user(userIDBad, serverid)[3]
+        userIDGood = maxRow[0]
+        userIDBad = minRow[0]
+
+        scoreGood = (await get_user(userIDGood, serverid))[3]
+        scoreBad = (await get_user(userIDBad, serverid))[3]
 
         userPos = await bot.fetch_user(userIDGood)
         userNeg = await bot.fetch_user(userIDBad)
